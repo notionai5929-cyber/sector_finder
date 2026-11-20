@@ -14,6 +14,7 @@ DEFAULT_START = "2000-01-01"
 DEFAULT_N = 5
 DEFAULT_BASIS = "excess"   # "raw" = 원수익률, "excess" = SPY 초과수익
 DEFAULT_TOP = 20           # 조건부 표: 선행 ETF 상승률 상위 %
+DEFAULT_TMIN = 1.96        # 추천 기준 |t| (1.96 = 양측 5% 유의수준)
 MIN_N = 10                 # 조건부 표: 표본이 이보다 적으면 회색 처리, 유의성 표시 안 함
 LAGS = (1, 2, 3)           # 시간 딜레이 = 단위일수 * lag
 
@@ -62,6 +63,48 @@ def cond_tables(start: str, n: int, basis: str, top: int) -> list[dict]:
     return tables
 
 
+def pick_info(periods: list[dict], lag: int, top: int) -> dict | None:
+    """순위표의 (마지막 - lag)번째 구간에서 상위 top%에 든 ETF.
+
+    마지막 구간을 현재 진행 중인 구간으로 보고, lag구간 전의 상위 ETF가
+    지금 구간에 미칠 영향을 조건부 표에서 찾기 위해 쓴다.
+    """
+    idx = len(periods) - 1 - lag
+    if idx < 0:
+        return None
+    ranking = periods[idx]["ranking"]
+    cutoff = max(1, int(len(ranking) * top / 100 + 0.5))   # top_rank_flags와 같은 규칙
+    return {"tickers": [t for t, _ in ranking[:cutoff]],
+            "start": periods[idx]["start"], "end": periods[idx]["end"],
+            "current": periods[-1]}
+
+
+def recommend(C: dict, leaders: list[str], side: str, t_min: float) -> list[dict]:
+    """노란 테두리(선행 상위) 열에서 유의한 신호가 있는 후행 ETF를 고른다.
+
+    side="buy":  N >= MIN_N, t >  t_min, 조건부 평균 > 0, 상승확률 > 50%
+    side="sell": N >= MIN_N, t < -t_min, 조건부 평균 < 0, 상승확률 < 50%
+    """
+    buy = side == "buy"
+    recs = {}
+    for c in leaders:
+        if c not in C["tickers"]:
+            continue
+        for r in C["tickers"]:
+            m, t, h, n = C["mean"][c][r], C["t"][c][r], C["hit"][c][r], C["n"][c][r]
+            if n < MIN_N or t != t:
+                continue
+            ok = (t > t_min and m > 0 and h > 0.5) if buy else (t < -t_min and m < 0 and h < 0.5)
+            if ok:
+                recs.setdefault(r, []).append({
+                    "leader": c, "mean": m, "hit": h, "n": int(n), "t": t,
+                    "base_mean": C["base_mean"][c][r], "base_hit": C["base_hit"][c][r],
+                })
+    sign = -1 if buy else 1   # 매수: 평균 높은 순, 매도: 평균 낮은 순
+    out = [{"ticker": r, "reasons": sorted(v, key=lambda x: sign * x["mean"])} for r, v in recs.items()]
+    return sorted(out, key=lambda x: sign * x["reasons"][0]["mean"])
+
+
 @app.route("/")
 def index():
     start = request.args.get("start") or DEFAULT_START
@@ -71,19 +114,28 @@ def index():
         date.fromisoformat(start)
         n = int(request.args.get("n") or DEFAULT_N)
         top = int(request.args.get("top") or DEFAULT_TOP)
+        t_min = float(request.args.get("tmin") or DEFAULT_TMIN)
+        if t_min < 0:
+            raise ValueError("t 기준은 0 이상이어야 합니다")
         if not 1 <= top <= 50:
             raise ValueError("상위 %는 1~50 사이여야 합니다")
         periods = period_rankings(PRICES, start, n)
         lags = lag_tables(start, n, basis)
         conds = cond_tables(start, n, basis, top)
     except ValueError as e:
-        error, n, top, periods, lags, conds = f"입력값 오류: {e}", DEFAULT_N, DEFAULT_TOP, [], [], []
+        error, n, top, t_min, periods, lags, conds = (
+            f"입력값 오류: {e}", DEFAULT_N, DEFAULT_TOP, DEFAULT_TMIN, [], [], [])
 
+    picks = [pick_info(periods, k, top) for k in LAGS] if conds else []
+    recs = [{"buy": recommend(C, p["tickers"], "buy", t_min) if p else [],
+             "sell": recommend(C, p["tickers"], "sell", t_min) if p else []}
+            for C, p in zip(conds, picks)]
     max_rank = max((len(p["ranking"]) for p in periods), default=0)
     return render_template(
         "index.html",
-        start=start, n=n, basis=basis, top=top,
+        start=start, n=n, basis=basis, top=top, t_min=t_min,
         periods=periods, max_rank=max_rank, lags=lags, conds=conds,
+        picks=picks, recs=recs,
         category=CATEGORY, error=error, min_n=MIN_N,
         data_end=PRICES.index[-1].date(),
     )

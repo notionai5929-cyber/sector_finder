@@ -44,6 +44,16 @@
   table.corr td.ns { color:var(--muted); }
   table.corr .few { background:var(--head) !important; color:var(--muted); font-weight:400; }
   table.corr th.few { color:#ff9f0a; }
+  table.corr .pick { box-shadow: inset 3px 0 #ffd60a, inset -3px 0 #ffd60a; }
+  table.corr th.pick-top { box-shadow: inset 3px 0 #ffd60a, inset -3px 0 #ffd60a, inset 0 3px #ffd60a; }
+  table.corr td.pick-bottom { box-shadow: inset 3px 0 #ffd60a, inset -3px 0 #ffd60a, inset 0 -3px #ffd60a; }
+  .rec { margin:10px 0 8px; padding:10px 14px; border:1px solid var(--line); border-left:4px solid #ffd60a;
+         border-radius:6px; font-size:13px; line-height:1.6; }
+  .rec-title { font-size:15px; font-weight:700; margin:4px 0; }
+  .rec-title.buy { color:#0a84ff; }
+  .rec-title.sell { color:#ff453a; }
+  .rec ul { margin:4px 0; padding-left:20px; }
+  .muted { color:var(--muted); font-size:12px; }
   table.corr td.diag { outline:2px solid var(--muted); outline-offset:-2px; }
 </style>
 </head>
@@ -58,6 +68,7 @@
       <option value="raw" {{ 'selected' if basis == 'raw' }}>원수익률</option>
     </select></label>
   <label>조건부: 순위 상위 % <input type="number" name="top" min="1" max="50" value="{{ top }}"></label>
+  <label>추천 기준 |t| <input type="number" name="tmin" min="0" step="0.01" value="{{ t_min }}"></label>
   <button type="submit">조회</button>
 </form>
 <div class="note">
@@ -132,43 +143,76 @@
 {% endfor %}
 
 {% for C in conds %}
+{% set P = picks[loop.index0] %}{% set R = recs[loop.index0] %}
+{% set pk = P.tickers if P else [] %}
 <h2>조건부 성과 · 가로 ETF가 순위 상위 {{ top }}%에 든 후 {{ C.days }}거래일 (단위일수 × {{ C.lag }})</h2>
 <div class="note">
   [기준: {{ 'SPY 초과수익' if basis == 'excess' else '원수익률' }}]
   위 순위표에서 가로(열) ETF가 t구간에 상위 {{ top }}% 순위에 들었을 때(예: 24개 중 5위 이내, 11개 중 2위 이내), 세로(행) ETF의 t+{{ C.lag }}구간 성과.
   윗줄 = 조건부 평균 상승률, 아랫줄 = 상승확률 · 표본 수(N).
   색 = 평소(같은 기간 전체 평균) 대비 차이: 파랑 = 평소보다 좋음, 빨강 = 나쁨.
-  굵은 글씨* = |t| &gt; 1.96, 흐린 글씨 = 유의하지 않음.
+  굵은 글씨* = |t| &gt; 1.96(양측 5%), 흐린 글씨 = 유의하지 않음.
   회색 칸 = 표본 {{ min_n }}개 미만이라 신뢰하기 어려움(유의성 표시 안 함). "-" = 표본 없음.
 </div>
 <div class="wrap corrwrap">
 <table class="corr">
   <thead><tr><th class="rowhead">후행↓ 선행→</th>
-    {% for c in C.tickers %}<th>{{ c }}</th>{% endfor %}
+    {% for c in C.tickers %}<th class="{{ 'pick pick-top' if c in pk }}">{{ c }}</th>{% endfor %}
   </tr>
   <tr><th class="rowhead">상위 진입</th>
-    {% for c in C.tickers %}<th class="{{ 'few' if C.entries[c] < min_n }}" title="{{ c }}가 순위 상위 {{ top }}%에 든 횟수">{{ C.entries[c]|int }}회</th>{% endfor %}
+    {% for c in C.tickers %}<th class="{{ 'few' if C.entries[c] < min_n }}{{ ' pick' if c in pk }}" title="{{ c }}가 순위 상위 {{ top }}%에 든 횟수">{{ C.entries[c]|int }}회</th>{% endfor %}
   </tr></thead>
   <tbody>
   {% for r in C.tickers %}
+    {% set last_row = loop.last %}
     <tr><th class="rowhead">{{ r }}</th>
     {% for c in C.tickers %}
       {% set m = C.mean[c][r] %}{% set t = C.t[c][r] %}{% set cnt = C.n[c][r]|int %}
       {% if m == m and cnt < min_n %}
-        <td class="few{{ ' diag' if r == c }}"
+        <td class="few{{ ' diag' if r == c }}{{ ' pick' if c in pk }}{{ ' pick-bottom' if c in pk and last_row }}"
             title="{{ c }} 순위 상위 {{ top }}% → {{ C.days }}거래일 뒤 {{ r }}&#10;표본 {{ cnt }}개뿐이라 신뢰하기 어려움">{{ '%+.1f'|format(m * 100) }}<div class="sub">{{ '%.0f'|format(C.hit[c][r] * 100) }}% · {{ cnt }}</div></td>
       {% elif m == m and t == t %}
         {% set sig = (t|abs) > 1.96 %}
         {% set a = [ (t|abs) / 4, 1 ]|min * (0.7 if sig else 0.25) %}
-        <td class="{{ 'sig' if sig else 'ns' }}{{ ' diag' if r == c }}"
+        <td class="{{ 'sig' if sig else 'ns' }}{{ ' diag' if r == c }}{{ ' pick' if c in pk }}{{ ' pick-bottom' if c in pk and last_row }}"
             style="background: {{ 'rgba(10,132,255,%.2f)'|format(a) if t >= 0 else 'rgba(255,69,58,%.2f)'|format(a) }}"
             title="{{ c }} 순위 상위 {{ top }}% → {{ C.days }}거래일 뒤 {{ r }}&#10;조건부 평균 {{ '%+.2f'|format(m * 100) }}% (평소 {{ '%+.2f'|format(C.base_mean[c][r] * 100) }}%)&#10;상승확률 {{ '%.0f'|format(C.hit[c][r] * 100) }}% (평소 {{ '%.0f'|format(C.base_hit[c][r] * 100) }}%)&#10;t={{ '%+.2f'|format(t) }}, N={{ cnt }}">{{ '%+.1f'|format(m * 100) }}{{ '*' if sig }}<div class="sub">{{ '%.0f'|format(C.hit[c][r] * 100) }}% · {{ cnt }}</div></td>
-      {% else %}<td class="ns" title="{{ c }}가 순위 상위 {{ top }}%에 든 적이 없어 표본 없음">-</td>{% endif %}
+      {% else %}<td class="ns{{ ' pick' if c in pk }}{{ ' pick-bottom' if c in pk and last_row }}" title="{{ c }}가 순위 상위 {{ top }}%에 든 적이 없어 표본 없음">-</td>{% endif %}
     {% endfor %}
     </tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
+<div class="rec">
+{% if not P %}
+  <b>매수추천: -</b> 순위표 구간이 부족해 판단할 수 없음.
+{% else %}
+  <div class="rec-basis">노란 테두리 = 순위표에서 <b>{{ P.start.strftime('%Y.%m.%d') }}~{{ P.end.strftime('%Y.%m.%d') }}</b> 구간(마지막 열의 {{ C.lag }}칸 앞) 상위 {{ top }}%:
+    <b>{{ P.tickers|join(', ') }}</b>
+    → 현재 진행 구간({{ P.current.start.strftime('%Y.%m.%d') }}~) 성과를 예상.
+    {% for t in P.tickers if t not in C.tickers %}<span class="muted">({{ t }}는 이 기준의 표에 없음)</span>{% endfor %}
+  </div>
+  {% for side, label, word in [('buy', '매수추천', '상승'), ('sell', '매도추천', '하락')] %}
+  {% set L2 = R[side] %}
+  <div class="rec-title {{ side }}">{{ label }}: {{ L2|map(attribute='ticker')|join(', ') if L2 else '없음' }}</div>
+  {% if L2 %}
+  <ul>
+  {% for x in L2 %}
+    {% for e in x.reasons %}
+    <li><b>{{ x.ticker }}</b> ← {{ e.leader }} 상위 후 {{ C.days }}거래일
+      {{ 'SPY 대비 ' if basis == 'excess' }}상승률 <b>{{ '%+.1f'|format(e.mean * 100) }}%</b> (평소 {{ '%+.1f'|format(e.base_mean * 100) }}%),
+      상승확률 <b>{{ '%.0f'|format(e.hit * 100) }}%</b> (평소 {{ '%.0f'|format(e.base_hit * 100) }}%),
+      t={{ '%+.2f'|format(e.t) }}, N={{ e.n }}</li>
+    {% endfor %}
+  {% endfor %}
+  </ul>
+  {% endif %}
+  {% endfor %}
+  <div class="muted">매수 기준: 노란 테두리 열의 칸 중 N≥{{ min_n }}, t&gt;{{ t_min }}, 조건부 평균&gt;0, 상승확률&gt;50%.
+    매도 기준: N≥{{ min_n }}, t&lt;−{{ t_min }}, 조건부 평균&lt;0, 상승확률&lt;50%{{ ' (SPY 대비 부진 = 비중 축소 후보)' if basis == 'excess' }}.
+    과거 통계상 경향일 뿐이며, 칸이 많아 우연한 신호가 섞일 수 있고 거래비용은 반영하지 않음.</div>
+{% endif %}
 </div>
 {% endfor %}
 <script>
