@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sector Finder</title>
+<style>
+  :root { --bg:#fff; --fg:#1d1d1f; --muted:#6e6e73; --line:#e3e3e8; --head:#f5f5f7; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1c1c1e; --fg:#f2f2f7; --muted:#a1a1a6; --line:#3a3a3c; --head:#2c2c2e; }
+  }
+  body { margin:0; padding:16px 24px; background:var(--bg); color:var(--fg);
+         font-family:-apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  h1 { font-size:20px; margin:0 0 12px; }
+  form { display:flex; gap:12px; align-items:end; flex-wrap:wrap; margin-bottom:8px; }
+  label { display:flex; flex-direction:column; font-size:12px; color:var(--muted); gap:4px; }
+  input { font-size:14px; padding:6px 8px; border:1px solid var(--line); border-radius:6px;
+          background:var(--bg); color:var(--fg); }
+  input[type=number] { width:80px; }
+  select { font-size:14px; padding:6px 8px; border:1px solid var(--line); border-radius:6px;
+           background:var(--bg); color:var(--fg); }
+  table.corr td .sub { font-size:10px; font-weight:400; color:var(--muted); }
+  button { font-size:14px; padding:7px 16px; border:0; border-radius:6px; background:#0a84ff; color:#fff; cursor:pointer; }
+  .note { font-size:12px; color:var(--muted); margin:4px 0 12px; }
+  .error { color:#ff453a; }
+  .wrap { overflow:auto; max-height:calc(100vh - 150px); border:1px solid var(--line); border-radius:8px; }
+  table { border-collapse:separate; border-spacing:0; font-size:12px; }
+  th, td { border-right:1px solid var(--line); border-bottom:1px solid var(--line);
+           padding:4px 8px; text-align:center; white-space:nowrap; }
+  thead th { position:sticky; background:var(--head); z-index:2; font-weight:600; }
+  thead tr:nth-child(1) th { top:0; }
+  thead tr:nth-child(2) th { top:23px; }
+  th.rowhead { position:sticky; left:0; background:var(--head); z-index:3; min-width:48px; }
+  tbody th.rowhead { z-index:1; font-weight:500; color:var(--muted); }
+  td .t { font-weight:600; }
+  td .r { font-size:11px; }
+  td.partial, th.partial { opacity:.6; }
+  td[data-t] { cursor:pointer; }
+  td.hl { background:#ffd60a !important; color:#1d1d1f; }
+  h2 { font-size:16px; margin:28px 0 4px; }
+  .corrwrap { max-height:none; }
+  table.corr td { font-variant-numeric:tabular-nums; min-width:40px; }
+  table.corr td.sig { font-weight:700; }
+  table.corr td.ns { color:var(--muted); }
+  table.corr .few { background:var(--head) !important; color:var(--muted); font-weight:400; }
+  table.corr th.few { color:#ff9f0a; }
+  table.corr td.diag { outline:2px solid var(--muted); outline-offset:-2px; }
+</style>
+</head>
+<body>
+<h1>기간별 ETF 상승률 순위</h1>
+<form method="get">
+  <label>검색 시작일 <input type="date" name="start" value="{{ start }}"></label>
+  <label>단위일수 n (거래일) <input type="number" name="n" min="1" value="{{ n }}"></label>
+  <label>상관/조건부 분석 기준
+    <select name="basis">
+      <option value="excess" {{ 'selected' if basis == 'excess' }}>SPY 초과수익</option>
+      <option value="raw" {{ 'selected' if basis == 'raw' }}>원수익률</option>
+    </select></label>
+  <label>조건부: 순위 상위 % <input type="number" name="top" min="1" max="50" value="{{ top }}"></label>
+  <button type="submit">조회</button>
+</form>
+<div class="note">
+  {% if error %}<span class="error">{{ error }}</span>{% else %}
+  구간 {{ periods|length }}개 · 데이터 최종일 {{ data_end }} ·
+  상승률 = 구간 마지막 날 수정종가 / 직전 거래일 수정종가 − 1 · 셀 색: 초록=상승, 빨강=하락
+  {% endif %}
+</div>
+
+{% if periods %}
+<div class="wrap">
+<table>
+  <thead>
+    <tr><th class="rowhead">시작일</th>
+      {% for p in periods %}<th class="{{ 'partial' if p.days < n }}">{{ p.start.strftime('%Y.%m.%d') }}</th>{% endfor %}
+    </tr>
+    <tr><th class="rowhead">종료일</th>
+      {% for p in periods %}<th class="{{ 'partial' if p.days < n }}">{{ p.end.strftime('%Y.%m.%d') }}</th>{% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for rank in range(max_rank) %}
+    <tr><th class="rowhead">{{ rank + 1 }}</th>
+      {% for p in periods %}
+        {% if rank < p.ranking|length %}
+          {% set t, r = p.ranking[rank] %}
+          {% set a = [ (r|abs) * 4, 0.6 ]|min %}
+          <td class="{{ 'partial' if p.days < n }}" data-t="{{ t }}"
+              style="background: {{ 'rgba(48,209,88,%.2f)'|format(a) if r >= 0 else 'rgba(255,69,58,%.2f)'|format(a) }}"
+              title="{{ t }} · {{ category.get(t, '') }}">
+            <div class="t">{{ t }}</div><div class="r">({{ '%+.1f'|format(r * 100) }}%)</div>
+          </td>
+        {% else %}<td></td>{% endif %}
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% for L in lags %}
+<h2>시차 교차상관 (스피어만) · 딜레이 {{ L.days }}거래일 (단위일수 × {{ L.lag }})</h2>
+<div class="note">
+  [기준: {{ 'SPY 초과수익' if basis == 'excess' else '원수익률' }}]
+  가로(열) ETF의 t구간 상승률과 세로(행) ETF의 t+{{ L.lag }}구간 상승률의 스피어만 상관계수.
+  양수(파랑) = 가로 ETF가 오른 뒤 세로 ETF도 오르는 경향, 음수(빨강) = 반대.
+  굵은 글씨* = p&lt;0.05, 흐린 글씨 = 유의하지 않음. 대각선 = 자기상관(모멘텀/반전).
+</div>
+<div class="wrap corrwrap">
+<table class="corr">
+  <thead><tr><th class="rowhead">후행↓ 선행→</th>
+    {% for c in L.tickers %}<th>{{ c }}</th>{% endfor %}
+  </tr></thead>
+  <tbody>
+  {% for r in L.tickers %}
+    <tr><th class="rowhead">{{ r }}</th>
+    {% for c in L.tickers %}
+      {% set rho = L.rho[c][r] %}{% set pv = L.p[c][r] %}
+      {% if rho == rho %}
+        {% set a = [ (rho|abs) / 0.15, 1 ]|min * (0.7 if pv < 0.05 else 0.25) %}
+        <td class="{{ 'sig' if pv < 0.05 else 'ns' }}{{ ' diag' if r == c }}"
+            style="background: {{ 'rgba(10,132,255,%.2f)'|format(a) if rho >= 0 else 'rgba(255,69,58,%.2f)'|format(a) }}"
+            title="{{ c }} 구간 상승률 → {{ L.days }}거래일 뒤 {{ r }}&#10;ρ={{ '%+.3f'|format(rho) }}, p={{ '%.4f'|format(pv) }}, N={{ L.n[c][r]|int }}">{{ '%+.2f'|format(rho) }}{{ '*' if pv < 0.05 }}</td>
+      {% else %}<td class="ns">-</td>{% endif %}
+    {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endfor %}
+
+{% for C in conds %}
+<h2>조건부 성과 · 가로 ETF가 순위 상위 {{ top }}%에 든 후 {{ C.days }}거래일 (단위일수 × {{ C.lag }})</h2>
+<div class="note">
+  [기준: {{ 'SPY 초과수익' if basis == 'excess' else '원수익률' }}]
+  위 순위표에서 가로(열) ETF가 t구간에 상위 {{ top }}% 순위에 들었을 때(예: 24개 중 5위 이내, 11개 중 2위 이내), 세로(행) ETF의 t+{{ C.lag }}구간 성과.
+  윗줄 = 조건부 평균 상승률, 아랫줄 = 상승확률 · 표본 수(N).
+  색 = 평소(같은 기간 전체 평균) 대비 차이: 파랑 = 평소보다 좋음, 빨강 = 나쁨.
+  굵은 글씨* = |t| &gt; 1.96, 흐린 글씨 = 유의하지 않음.
+  회색 칸 = 표본 {{ min_n }}개 미만이라 신뢰하기 어려움(유의성 표시 안 함). "-" = 표본 없음.
+</div>
+<div class="wrap corrwrap">
+<table class="corr">
+  <thead><tr><th class="rowhead">후행↓ 선행→</th>
+    {% for c in C.tickers %}<th>{{ c }}</th>{% endfor %}
+  </tr>
+  <tr><th class="rowhead">상위 진입</th>
+    {% for c in C.tickers %}<th class="{{ 'few' if C.entries[c] < min_n }}" title="{{ c }}가 순위 상위 {{ top }}%에 든 횟수">{{ C.entries[c]|int }}회</th>{% endfor %}
+  </tr></thead>
+  <tbody>
+  {% for r in C.tickers %}
+    <tr><th class="rowhead">{{ r }}</th>
+    {% for c in C.tickers %}
+      {% set m = C.mean[c][r] %}{% set t = C.t[c][r] %}{% set cnt = C.n[c][r]|int %}
+      {% if m == m and cnt < min_n %}
+        <td class="few{{ ' diag' if r == c }}"
+            title="{{ c }} 순위 상위 {{ top }}% → {{ C.days }}거래일 뒤 {{ r }}&#10;표본 {{ cnt }}개뿐이라 신뢰하기 어려움">{{ '%+.1f'|format(m * 100) }}<div class="sub">{{ '%.0f'|format(C.hit[c][r] * 100) }}% · {{ cnt }}</div></td>
+      {% elif m == m and t == t %}
+        {% set sig = (t|abs) > 1.96 %}
+        {% set a = [ (t|abs) / 4, 1 ]|min * (0.7 if sig else 0.25) %}
+        <td class="{{ 'sig' if sig else 'ns' }}{{ ' diag' if r == c }}"
+            style="background: {{ 'rgba(10,132,255,%.2f)'|format(a) if t >= 0 else 'rgba(255,69,58,%.2f)'|format(a) }}"
+            title="{{ c }} 순위 상위 {{ top }}% → {{ C.days }}거래일 뒤 {{ r }}&#10;조건부 평균 {{ '%+.2f'|format(m * 100) }}% (평소 {{ '%+.2f'|format(C.base_mean[c][r] * 100) }}%)&#10;상승확률 {{ '%.0f'|format(C.hit[c][r] * 100) }}% (평소 {{ '%.0f'|format(C.base_hit[c][r] * 100) }}%)&#10;t={{ '%+.2f'|format(t) }}, N={{ cnt }}">{{ '%+.1f'|format(m * 100) }}{{ '*' if sig }}<div class="sub">{{ '%.0f'|format(C.hit[c][r] * 100) }}% · {{ cnt }}</div></td>
+      {% else %}<td class="ns" title="{{ c }}가 순위 상위 {{ top }}%에 든 적이 없어 표본 없음">-</td>{% endif %}
+    {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endfor %}
+<script>
+  // 칸을 클릭하면 같은 ETF의 모든 칸을 노란색으로 표시. 같은 ETF를 다시 클릭하면 해제.
+  let selected = null;
+  document.querySelector('tbody')?.addEventListener('click', (e) => {
+    const td = e.target.closest('td[data-t]');
+    if (!td) return;
+    document.querySelectorAll('td.hl').forEach(c => c.classList.remove('hl'));
+    const t = td.dataset.t;
+    selected = (selected === t) ? null : t;
+    if (selected) document.querySelectorAll(`td[data-t="${selected}"]`).forEach(c => c.classList.add('hl'));
+  });
+</script>
+</body>
+</html>
