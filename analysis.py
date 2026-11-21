@@ -8,12 +8,13 @@ import pandas as pd
 DATA_DIR = Path(__file__).parent / "data"
 
 
-def load_prices() -> pd.DataFrame:
-    return pd.read_csv(DATA_DIR / "adj_close.csv", index_col="Date", parse_dates=True)
+def load_prices(market: str) -> pd.DataFrame:
+    return pd.read_csv(DATA_DIR / market / "adj_close.csv", index_col="Date",
+                       parse_dates=True, encoding="utf-8-sig")
 
 
-def load_etf_list() -> pd.DataFrame:
-    return pd.read_csv(DATA_DIR / "etf_list.csv", encoding="utf-8-sig")
+def load_etf_list(market: str) -> pd.DataFrame:
+    return pd.read_csv(DATA_DIR / market / "etf_list.csv", encoding="utf-8-sig")
 
 
 def period_rankings(prices: pd.DataFrame, start: str, n: int) -> list[dict]:

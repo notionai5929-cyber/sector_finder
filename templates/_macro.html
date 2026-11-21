@@ -1,0 +1,107 @@
+{# 매크로 분석 탭. app.macro_tables() 결과(mac)를 그린다. #}
+{% if not mac %}
+<div class="note">매크로 데이터가 없습니다. <b>데이터 갱신</b> 버튼을 누르거나 <code>python fetch_macro_data.py</code>를 실행하세요.</div>
+{% else %}
+<div class="note">
+  [기준: {{ bench ~ ' 초과수익' if basis == 'excess' else '원수익률' }}]
+  구간 = 지표 발표일 종가 → 다음 발표일 종가({{ '국장은 발표 다음 거래일 종가부터' if market == 'kr' else '발표일이 휴장이면 다음 거래일' }}).
+  그 구간의 국면은 발표일에 나온 값으로 판단한다. 단위일수 n과 순위 상위 %는 이 탭에서 쓰지 않는다.<br>
+  한계: 발표일은 규칙으로 근사한 값이고(실제와 며칠 차이 가능), 지표는 최신 수정치라 발표 당시 값과 다를 수 있으며, 국면 전환 표본은 작다.
+</div>
+
+<h2>현재 국면</h2>
+<div class="wrap corrwrap">
+<table class="corr summary">
+  <thead><tr><th class="rowhead">지표</th><th>최신 값</th><th>근사 발표일</th><th>현재 국면</th><th>최근 12회 국면 (오래된 → 최근)</th></tr></thead>
+  <tbody>
+  {% for T in mac.tables + [mac.regime] %}
+    {% set c = T.current %}
+    <tr><th class="rowhead" title="{{ T.desc }}">{{ T.title|replace(' 국면', '') }}</th>
+      {% if c %}
+      <td>{% if T.key in indicators and c.signal == c.signal %}{{ '%.2f'|format(c.signal) }}{{ indicators[T.key].unit }}{% else %}-{% endif %}</td>
+      <td>{{ c.release_date.strftime('%Y.%m.%d') }}</td>
+      <td class="cur-state">{{ c.state }}</td>
+      <td class="hist">{% for d, s in c.history %}<span class="chip {{ 'on' if s == c.state }}" title="{{ d.strftime('%Y.%m.%d') }}">{{ s|replace('CPI ', '')|replace('PCE ', '')|replace('제조업 ', '')|replace('금리차 ', '')|replace('스태그플레이션', '스태그') }}</span>{% endfor %}</td>
+      {% else %}<td colspan="4">-</td>{% endif %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% for T in mac.tables + [mac.regime] + ([mac.transition] if mac.transition else []) %}
+{% set cur = T.current.state if T.current else None %}
+<h2>{{ T.title }}</h2>
+<div class="note">{{ T.desc }}. 칸 윗줄 = 다음 발표일까지 평균 상승률, 아랫줄 = 상승확률 · 표본 수(N).
+  색 = 전체 평균 대비 차이(파랑 = 좋음, 빨강 = 나쁨), 굵은 글씨* = |t| &gt; {{ t_min }}, 회색 = 표본 {{ T.min_n }}개 미만.
+  {% if cur %}노란 테두리 = 현재 국면.{% endif %} 구간 {{ T.n_periods }}개.</div>
+<div class="macro-table">
+<div class="wrap corrwrap">
+<table class="corr">
+  <thead><tr><th class="rowhead">ETF↓ 국면→</th>
+    {% for s in T.states %}<th class="mstate {{ 'pick pick-top' if s == cur }}">{{ s }}</th>{% endfor %}
+  </tr></thead>
+  <tbody>
+  {% for tk in T.tickers %}
+    {% set last_row = loop.last %}
+    <tr><th class="rowhead" title="{{ etf_info[tk].description }}">{{ tk }}</th>
+    {% for s in T.states %}
+      {% set col = T.stats.by_state[s] %}
+      {% set m = col.mean[tk] %}{% set t = col.t[tk] %}{% set cnt = col.n[tk]|int %}
+      {% set pk = ' pick' if s == cur else '' %}{% set pb = ' pick-bottom' if s == cur and last_row else '' %}
+      {% if m == m and cnt < T.min_n %}
+        <td class="few{{ pk }}{{ pb }}" title="표본 {{ cnt }}개뿐이라 신뢰하기 어려움">{{ '%+.1f'|format(m * 100) }}<div class="sub">{{ '%.0f'|format(col.hit[tk] * 100) }}% · {{ cnt }}</div></td>
+      {% elif m == m and t == t %}
+        {% set sig = (t|abs) > t_min %}
+        {% set a = [ (t|abs) / 4, 1 ]|min * (0.7 if sig else 0.25) %}
+        <td class="{{ 'sig' if sig else 'ns' }}{{ pk }}{{ pb }}"
+            style="background: {{ 'rgba(10,132,255,%.2f)'|format(a) if t >= 0 else 'rgba(255,69,58,%.2f)'|format(a) }}"
+            title="{{ s }} → 다음 발표일까지 {{ tk }}&#10;평균 {{ '%+.2f'|format(m * 100) }}% (전체 {{ '%+.2f'|format(T.stats.base_mean[tk] * 100) }}%)&#10;상승확률 {{ '%.0f'|format(col.hit[tk] * 100) }}% (전체 {{ '%.0f'|format(T.stats.base_hit[tk] * 100) }}%)&#10;t={{ '%+.2f'|format(t) }}, N={{ cnt }}">{{ '%+.1f'|format(m * 100) }}{{ '*' if sig }}<div class="sub">{{ '%.0f'|format(col.hit[tk] * 100) }}% · {{ cnt }}</div></td>
+      {% else %}<td class="ns{{ pk }}{{ pb }}" title="표본 없음">-</td>{% endif %}
+    {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="rec">
+{% if T.key == 'transition' %}
+  {% for k in T.states %}
+  {% set mv = T.moves[k] %}
+  <div class="rec-title buy">국면이 {{ k.split('→')[1] }}(으)로 바뀌면 갈아탈 후보: {{ mv.buy|map(attribute='ticker')|join(', ') if mv.buy else '없음' }}</div>
+  {% if mv.sell %}<div class="rec-title sell">피할 ETF: {{ mv.sell|map(attribute='ticker')|join(', ') }}</div>{% endif %}
+  <ul>
+  {% for e in mv.buy + mv.sell %}
+    <li><b>{{ e.ticker }}</b> 전환 직후 {{ bench ~ ' 대비 ' if basis == 'excess' }}상승률 <b>{{ '%+.1f'|format(e.mean * 100) }}%</b> (전체 {{ '%+.1f'|format(e.base_mean * 100) }}%),
+      상승확률 <b>{{ '%.0f'|format(e.hit * 100) }}%</b> (전체 {{ '%.0f'|format(e.base_hit * 100) }}%), t={{ '%+.2f'|format(e.t) }}, N={{ e.n }}</li>
+  {% endfor %}
+  </ul>
+  {% endfor %}
+  <div class="muted">전환 기준: 전환 {{ T.min_n }}회 이상, |t|&gt;{{ t_min }}, 평균과 상승확률 방향 일치. 표본이 작아(전환 수십 회) 참고용이다.</div>
+{% elif cur %}
+  {% for side, label in [('buy', '현재 국면(' ~ cur ~ ')에서 좋았던 ETF'), ('sell', '현재 국면(' ~ cur ~ ')에서 나빴던 ETF')] %}
+  {% set L2 = T[side] %}
+  <div class="rec-title {{ side }}">{{ label }}: {{ L2|map(attribute='ticker')|join(', ') if L2 else '없음' }}</div>
+  {% if L2 %}<ul>
+  {% for e in L2 %}
+    <li><b>{{ e.ticker }}</b> {{ bench ~ ' 대비 ' if basis == 'excess' }}상승률 <b>{{ '%+.1f'|format(e.mean * 100) }}%</b> (전체 {{ '%+.1f'|format(e.base_mean * 100) }}%),
+      상승확률 <b>{{ '%.0f'|format(e.hit * 100) }}%</b> (전체 {{ '%.0f'|format(e.base_hit * 100) }}%), t={{ '%+.2f'|format(e.t) }}, N={{ e.n }}</li>
+  {% endfor %}
+  </ul>{% endif %}
+  {% endfor %}
+  <div class="muted">기준: 현재 국면 열에서 N≥{{ T.min_n }}, |t|&gt;{{ t_min }}, 평균과 상승확률 방향 일치. 과거 통계상 경향일 뿐이며 거래비용은 반영하지 않음.</div>
+{% endif %}
+</div>
+<div class="guide">
+  <div class="guide-title">국면 해석</div>
+  <ul>
+  {% for s, text in T.guide.items() %}
+    <li class="{{ 'on' if s == cur }}"><b>{{ s }}:</b> {{ text }}</li>
+  {% endfor %}
+  </ul>
+  {% if T.key != 'transition' %}<div class="muted">일반적으로 알려진 해석이다. 이 데이터에서 실제로 그랬는지는 위 표로 확인한다.</div>{% endif %}
+</div>
+{% endfor %}
+{% endif %}
