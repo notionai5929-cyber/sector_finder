@@ -1,0 +1,12 @@
+# Render 무료 배포 설정 (https://render.com → New → Blueprint → 이 저장소 선택)
+services:
+  - type: web
+    name: sector-finder
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # 워커 1개: 데이터 갱신 잠금과 메모리 캐시를 한 프로세스에서 공유하기 위해
+    startCommand: gunicorn app:app --workers 1 --threads 4 --timeout 180
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8

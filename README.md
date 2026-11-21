@@ -37,6 +37,21 @@ python app.py                      # 웹 서버 실행 → http://localhost:5000
 python -m pytest                   # 테스트
 ```
 
+## 웹에 배포하기 (Render 무료)
+
+다른 사람이 주소로 접속해 입력값을 바꿔가며 볼 수 있게 하려면 Render(https://render.com)에 배포한다. 배포 설정은 `render.yaml`, 패키지 목록은 `requirements.txt`에 있다.
+
+1. https://render.com 에 GitHub 계정으로 가입한다.
+2. Dashboard → **New → Blueprint** → 이 저장소(`sector_finder`)를 고른다. (비공개 저장소면 Render에 GitHub 접근 권한을 준다.)
+3. `render.yaml`을 읽어 서비스 `sector-finder`가 만들어지면 **Apply**. 빌드가 끝나면 `https://sector-finder-xxxx.onrender.com` 같은 주소가 생긴다.
+4. 이후 `main`에 푸시하면 자동으로 다시 배포된다.
+
+무료 등급의 특징
+- 15분간 접속이 없으면 잠들고, 다음 첫 접속은 깨어나는 데 30초~1분 걸린다.
+- CPU가 PC보다 훨씬 느려서, 기본 설정(2000년~, 5일) 페이지는 PC(약 3초)보다 오래 걸린다. 시작일을 늦추면 빨라진다.
+- 웹에서 `데이터 갱신`을 누르면 그 서버에만 저장되고, 재배포·재시작 때 저장소에 커밋된 데이터로 돌아간다. 데이터를 오래 유지하려면 PC에서 갱신한 뒤 커밋·푸시한다.
+- 주소를 아는 사람은 누구나 `데이터 갱신`을 누를 수 있다(동시에 한 번만 실행됨).
+
 ## 대상 ETF: 미장
 
 모든 ETF는 **데이터 기간 20년 이상**인 것만 사용한다.
